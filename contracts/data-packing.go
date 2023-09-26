@@ -1,18 +1,13 @@
-package main
+package contracts
 
 import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math/big"
 	"reflect"
-	"strconv"
-	"strings"
-	"sync"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -28,69 +23,29 @@ var (
 	ErrBytesSizeOverTarget    = errors.New("err - bytes array size exceeds target")
 )
 
-type Contract struct {
-	ABI     *abi.ABI
-	Address common.Address
-	Lock    sync.RWMutex
-}
-
-func NewContract(contractAddress common.Address, abiRawJSON string) (*Contract, error) {
-	abi, err2 := abi.JSON(strings.NewReader(abiRawJSON))
-	if err2 != nil {
-		log.Warn("err - loadABI", "error:", err2)
-		return nil, err2
-	}
-	return &Contract{
-		ABI:     &abi,
-		Address: contractAddress,
-	}, nil
-}
-
-func (c *Contract) getMethodNames() []string {
+func (c *Contract) EncodeTxData(funcName string, funcArgs string) ([]byte, error) {
+	// funcArgs must be a JSON-format string
 	c.Lock.RLock()
 	defer c.Lock.RUnlock()
-	methodNames := make([]string, len(c.ABI.Methods))
-	n := 0
-	for name, method := range c.ABI.Methods {
-		if method.IsPayable() {
-			methodNames[n] = name
-			n++
-		}
+
+	method, ok := c.ABI.Methods[funcName]
+	if !ok {
+		return []byte{0}, ErrCantFindMethodABI
 	}
-	return methodNames
-}
 
-func (c *Contract) printArgs(funcName string) {
-	if method, ok := c.ABI.Methods[funcName]; ok {
-		for i, arg := range method.Inputs {
-			fmt.Println(strconv.Itoa(i) + ": " + arg.Name + "  " + arg.Type.String())
-		}
+	argValues, err := handleLayerZeroUnmarshal(funcArgs)
+	if err != nil {
+		log.Warn("err", "encodeTx 0a", err)
+		return []byte{0}, err
 	}
-}
 
-func (c *Contract) UpdateContractAddress(contractAddress common.Address) {
-	c.Lock.Lock()
-	defer c.Lock.Unlock()
-	c.Address = contractAddress
-}
-
-func (c *Contract) getContractAddress() common.Address {
-	c.Lock.RLock()
-	defer c.Lock.RUnlock()
-	contractAddress := c.Address
-	return contractAddress
-}
-
-func (c *Contract) UpdateContractABI(abiRaw []byte) error {
-	c.Lock.Lock()
-	defer c.Lock.Unlock()
-	abi, err2 := abi.JSON(strings.NewReader(string(abiRaw)))
-	if err2 != nil {
-		log.Warn("err - loadABI 2", "error:", err2)
-		return err2
+	values, err := buildInterfaceValues(argValues, method)
+	if err != nil {
+		log.Warn("err", "encodeTx 1a", err)
+		return []byte{0}, err
 	}
-	c.ABI = &abi
-	return nil
+
+	return c.ABI.Pack(funcName, values...)
 }
 
 // indirect recursively dereferences the value until it either gets the value
@@ -307,29 +262,4 @@ func buildInterfaceValues(argValues []json.RawMessage, method abi.Method) ([]int
 		values[i] = value
 	}
 	return values, nil
-}
-
-func (c *Contract) encodeTxData(funcName string, funcArgs string) ([]byte, error) {
-	// funcArgs must be a JSON-format string
-	c.Lock.RLock()
-	defer c.Lock.RUnlock()
-
-	method, ok := c.ABI.Methods[funcName]
-	if !ok {
-		return []byte{0}, ErrCantFindMethodABI
-	}
-
-	argValues, err := handleLayerZeroUnmarshal(funcArgs)
-	if err != nil {
-		log.Warn("err", "encodeTx 0a", err)
-		return []byte{0}, err
-	}
-
-	values, err := buildInterfaceValues(argValues, method)
-	if err != nil {
-		log.Warn("err", "encodeTx 1a", err)
-		return []byte{0}, err
-	}
-
-	return c.ABI.Pack(funcName, values...)
 }

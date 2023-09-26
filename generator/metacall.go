@@ -1,4 +1,4 @@
-package main
+package generator
 
 import (
 	"encoding/json"
@@ -27,19 +27,17 @@ type MetacallArgs struct {
 	Verification string   `json:"verification"`
 }
 
-func (h *Harness) buildAtlasCalldata(
-	dConfig string, userOp string, solverOps []string, verification string) (*hexutil.Bytes, error) {
+func (h *Harness) BuildMetacall(metacallArgs MetacallArgs) (*hexutil.Bytes, error) {
 
-	calldataRaw, err := json.Marshal(MetacallArgs{
-		DConfig:      dConfig,
-		UserOp:       userOp,
-		SolverOps:    solverOps,
-		Verification: verification,
-	})
+	calldataRaw, err := json.Marshal(metacallArgs)
 	if err != nil {
 		return new(hexutil.Bytes), err
 	}
 
-	calldataBytes, err := h.Atlas.encodeTxData(atlasFuncName, string(calldataRaw))
+	calldataBytes, err := h.Atlas.EncodeTxData(atlasFuncName, string(calldataRaw))
+	if err != nil {
+		return new(hexutil.Bytes), err
+	}
+
 	return (*hexutil.Bytes)(&calldataBytes), nil
 }

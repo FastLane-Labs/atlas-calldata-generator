@@ -1,4 +1,4 @@
-package main
+package generator
 
 import "fmt"
 
@@ -13,6 +13,26 @@ func (h *Harness) printSwapArgs() error {
 		fmt.Println(err)
 		return err
 	}
+	return nil
+}
+
+func (h *Harness) TestSwapIntent() error {
+	fmt.Println("TestSwapIntent()")
+
+	err := h.printArgs(swapDAppName, swapDAppFunc)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	h.printSwapArgs()
+
+	calldata, err := h.GenerateDAppCalldata(swapDAppName, swapDAppFunc, SwapIntentExample)
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println("DApp calldata: " + calldata)
+
 	return nil
 }
 

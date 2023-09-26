@@ -1,4 +1,4 @@
-package main
+package generator
 
 import (
 	"encoding/json"
@@ -6,42 +6,81 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/polygon-fast-lane/calldata-generator/contracts"
+)
+
+const (
+	ABI_DIRECTORY string = "abis"
 )
 
 // build UserData onto this
 type Harness struct {
-	DAppMap    map[common.Address]*Contract
+	DAppMap    map[common.Address]*contracts.Contract
 	AddressMap map[string]common.Address
-	Atlas      *Contract
+	Atlas      *contracts.Contract
 	Lock       sync.Mutex
 }
 
 func NewHarness() *Harness {
 	addressMap := loadAddresses()
 	return &Harness{
-		DAppMap:    make(map[common.Address]*Contract),
+		DAppMap:    make(map[common.Address]*contracts.Contract),
 		AddressMap: loadAddresses(),
 		Atlas:      loadAtlas(addressMap["Atlas"]),
 	}
+}
+
+func (h *Harness) Run() {
+	for dapp := range h.AddressMap {
+		if dapp != "Atlas" {
+			err := h.newDAppFromOS(dapp)
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				fmt.Println(dapp + " DApp Loaded")
+			}
+		}
+	}
+}
+
+func (h *Harness) newDAppFromOS(dapp string) error {
+
+	swapIntentAddr, ok := h.AddressMap[dapp]
+	if !ok {
+		return errors.New("err - " + dapp + " not in config")
+	}
+
+	workDir, err := os.Getwd()
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	path := filepath.Join(workDir, ABI_DIRECTORY, dapp+".json")
+	fmt.Println(path)
+	err = h.loadContractOS(swapIntentAddr, path)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (h *Harness) NewContract(contractAddress common.Address, abiRawJSON string) error {
 	h.Lock.Lock()
 	defer h.Lock.Unlock()
 
-	dappContract, err := NewContract(contractAddress, abiRawJSON)
+	dappContract, err := contracts.NewContract(contractAddress, abiRawJSON)
 	if err != nil {
 		return err
 	}
-	methodNames := dappContract.getMethodNames()
+	methodNames := dappContract.GetMethodNames()
 	if len(methodNames) < 1 {
 		return errors.New("err - no available methods found")
 	}
-	h.DAppMap[dappContract.getContractAddress()] = dappContract
+	h.DAppMap[dappContract.GetContractAddress()] = dappContract
 	return nil
 }
 
@@ -79,30 +118,17 @@ func (h *Harness) printArgs(dapp string, funcName string) error {
 	}
 
 	fmt.Println("arguments for the " + funcName + " function of " + dapp)
-	contract.printArgs(funcName)
+	contract.PrintArgs(funcName)
 	return nil
 }
 
-func (h *Harness) generateDAppCalldata(dapp string, funcName string, args string) (string, error) {
-	dappAddr, ok := h.AddressMap[dapp]
-	if !ok {
-		return "", errors.New("err - DApp Address not found A")
-	}
-
-	contract, ok := h.DAppMap[dappAddr]
-	if !ok {
-		return "", errors.New("err - DApp Contract not found B")
-	}
-
-	result, err := contract.encodeTxData(funcName, args)
-	if err != nil {
-		return "", err
-	}
-	return hexutil.Encode(result), nil
-}
-
 func loadAddresses() map[string]common.Address {
-	jsonFile, err := os.Open("./config.json")
+	workDir, err := os.Getwd()
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	jsonFile, err := os.Open(filepath.Join(workDir, "config.json"))
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -123,8 +149,13 @@ func loadAddresses() map[string]common.Address {
 	return addressMap
 }
 
-func loadAtlas(atlasAddress common.Address) *Contract {
-	jsonFile, err := os.Open("./abis/Atlas.json")
+func loadAtlas(atlasAddress common.Address) *contracts.Contract {
+	workDir, err := os.Getwd()
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	jsonFile, err := os.Open(filepath.Join(workDir, ABI_DIRECTORY, "Atlas.json"))
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -132,13 +163,7 @@ func loadAtlas(atlasAddress common.Address) *Contract {
 
 	byteValue, _ := io.ReadAll(jsonFile)
 
-	var nestedABI map[string]json.RawMessage
-	err = json.Unmarshal([]byte(byteValue), &nestedABI)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	atlasContract, err := NewContract(atlasAddress, string(nestedABI["abi"]))
+	atlasContract, err := contracts.NewContract(atlasAddress, string(byteValue))
 	if err != nil {
 		fmt.Println(err)
 	}
